@@ -1979,6 +1979,7 @@ public class Settings implements Serializable {
 	public static INIFileBool m_EnsembleOOBestimate;
 	protected INIFileBool m_FeatureRanking;
 	protected INIFileBool m_WriteEnsemblePredictions;
+	protected INIFileBool m_WriteBagTrainingFiles;
 	protected INIFileNominalOrIntOrVector m_BagSelection;
 
 	/** Do we want to use different random depth for different iterations of ensemble.
@@ -2074,6 +2075,11 @@ public class Settings implements Serializable {
 
 	public boolean shouldWritePredictionsFromEnsemble(){
 		return m_WriteEnsemblePredictions.getValue();
+	}
+	
+	// currently works for Bagging and RForest
+	public boolean shouldWriteBagTrainingFiles(){
+		return m_WriteBagTrainingFiles.getValue();
 	}
 
 	public static boolean shouldEstimateOOB( ){
@@ -2390,6 +2396,7 @@ public class Settings implements Serializable {
 		m_SectionEnsembles.addNode(m_EnsembleOOBestimate = new INIFileBool("OOBestimate", false));
 		m_SectionEnsembles.addNode(m_FeatureRanking = new INIFileBool("FeatureRanking", false));
 		m_SectionEnsembles.addNode(m_WriteEnsemblePredictions = new INIFileBool("WriteEnsemblePredictions", false));
+		m_SectionEnsembles.addNode(m_WriteBagTrainingFiles = new INIFileBool("WriteBagTrainingFiles", false));
 		m_SectionEnsembles.addNode(m_EnsembleRandomDepth = new INIFileBool("EnsembleRandomDepth", false));
 		m_SectionEnsembles.addNode(m_BagSelection = new INIFileNominalOrIntOrVector("BagSelection", NONELIST));
 		m_BagSelection.setInt(-1);

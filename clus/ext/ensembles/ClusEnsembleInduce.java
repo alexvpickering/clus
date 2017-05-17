@@ -34,6 +34,7 @@ import clus.main.*;
 import clus.model.ClusModel;
 import clus.model.ClusModelInfo;
 import clus.model.modelio.ClusModelCollectionIO;
+import clus.data.io.ARFFFile;
 import clus.data.rows.RowData;
 import clus.data.rows.TupleIterator;
 import clus.data.type.*;
@@ -371,6 +372,9 @@ public class ClusEnsembleInduce extends ClusInductionAlgorithm {
 		long one_bag_time = ResourceInfo.getTime();
 		if (Settings.VERBOSE > 0) System.out.println("Bag: " + i);
 		ClusRun crSingle = m_BagClus.partitionDataBasic(cr.getTrainingSet(),msel,cr.getSummary(),i);
+		if (getSettings().shouldWriteBagTrainingFiles()) { /////////CV added
+			ARFFFile.writeArffWeighted(getSettings().getAppName() + "-bag-"+i+".arff", (RowData)crSingle.getTrainingSet());
+		}
 		DepthFirstInduce ind;
 		if (getSchema().isSparse()) {
 			ind = new DepthFirstInduceSparse(this);

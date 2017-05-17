@@ -191,6 +191,27 @@ public class ARFFFile {
 		}
 		wrt.close();
 	}
+	
+	/*
+	 * Writes the arff file where each tuple is replicated by its weight. This is used for printing out the individual
+	 * arff files in a bagging scheme (with the above procedure the number of tuples per file is smaller than the 
+	 * training set size).
+	 */
+	public static void writeArffWeighted(String fname, RowData data) throws IOException, ClusException {
+		PrintWriter wrt = new PrintWriter(new OutputStreamWriter(new FileOutputStream(fname)));
+		ClusSchema schema = data.getSchema();
+		writeArffHeader(wrt, schema);
+		wrt.println("@DATA");
+		for (int j = 0; j < data.getNbRows(); j++) {
+			DataTuple tuple = data.getTuple(j);
+			double weight = tuple.getWeight();
+			while (weight > 0) {
+				tuple.writeTuple(wrt);
+				weight--;
+			}
+		}
+		wrt.close();
+	}
 
 	// Exports data to CN2 format. Can be deleted ...
 	public static void writeCN2Data(String fname, RowData data) throws IOException, ClusException {
