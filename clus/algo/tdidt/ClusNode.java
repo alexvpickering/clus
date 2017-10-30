@@ -1008,6 +1008,63 @@ public class ClusNode extends MyNode implements ClusModel {
 		}		
 	}
 	
+	
+	/*
+	 * Prints for each example the path that is followed in the tree, both with node identifiers, and in boolean format
+	 * (used in ICDM 2011 paper on "random forest feature induction")
+	 * only binary trees are supported
+	 */
+	public final void printPaths(PrintWriter writer, String pathprefix, String numberprefix, RowData examples, OOBSelection oob_sel, boolean testset) {
+		String newnumberprefix;
+		if (numberprefix.equals("")) {
+			newnumberprefix = "" + getID();
+		}
+		else {
+			newnumberprefix = numberprefix+"_"+getID();
+		}
+		int arity = getNbChildren();
+		if (arity > 0) {
+			if (arity == 2) {
+				
+				RowData examples0 = null;
+				RowData examples1 = null;
+				RowData examplesMin1 = null;
+				if (examples!=null){
+					examples0 = examples.apply(m_Test, 0);
+					examples1 = examples.apply(m_Test, 1);
+					examplesMin1 = examples.apply(m_Test, -1); // ook -1 testen en die toevoegen aan zowel examples0 en examples1 voor missingvalues
+				}	
+				examples0.add(examplesMin1);
+				examples1.add(examplesMin1);
+				((ClusNode)getChild(YES)).printPaths(writer, pathprefix+"0", newnumberprefix, examples0, oob_sel, testset);
+				((ClusNode)getChild(NO)).printPaths(writer, pathprefix+"1", newnumberprefix, examples1, oob_sel, testset);
+				
+			} else {
+				System.out.println("PrintPaths error: only binary trees supported");
+			}
+		} else { //at the leaves
+			if (examples!=null){
+				for (int i=0; i<examples.getNbRows(); i++) {
+					int exampleindex = examples.getTuple(i).getIndex();
+					if (testset) {
+						writer.println(exampleindex + "  " + pathprefix + " " + newnumberprefix + "  TEST");
+					}
+					else if (oob_sel != null) {
+						boolean oob = oob_sel.isSelected(exampleindex);
+						if (oob) {
+							writer.println(exampleindex + "  " + pathprefix + " " + newnumberprefix + "  OOB");
+						}
+						else writer.println(exampleindex + "  " + pathprefix + " " + newnumberprefix);
+					}
+					else writer.println(exampleindex + "  " + pathprefix + " " + newnumberprefix);
+					writer.flush();
+                }	
+			}
+			
+		}
+	}
+	
+	
 	// only binary trees supported
 	// no "unknown" branches supported
 	/*public final void printPaths(PrintWriter writer, String pathprefix, String numberprefix, RowData examples, OOBSelection oob_sel) {

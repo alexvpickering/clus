@@ -24,6 +24,7 @@ package clus.ext.ensembles;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.io.*;
 
 import jeans.resource.ResourceInfo;
 
@@ -429,6 +430,14 @@ public class ClusEnsembleInduce extends ClusInductionAlgorithm {
 		((ClusNode)model).printPaths(pw, "", (RowData)cr.getTrainingSet(), oob_sel);
 		if ((RowData)cr.getTestSet() != null) ((ClusNode)model).printPaths(pw, "", (RowData)cr.getTestSet());
 		 */
+		
+		// printing paths taken by each example in each tree (used in ICDM'11 paper on "Random forest based feature induction")	
+		if (getSettings().isPrintEnsemblePaths()) {
+			PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream("tree_"+i+".path")));		
+			((ClusNode)model).numberCompleteTree();
+			((ClusNode)model).printPaths(pw, "", "", (RowData)cr.getTrainingSet(), oob_sel, false);
+			if ((RowData)cr.getTestSet() != null) ((ClusNode)model).printPaths(pw, "", "", (RowData)cr.getTestSet(), null, true);
+		}
 		
 		//Valid only when test set is supplied
 		if (checkToOutEnsemble(i) && (getSettings().getBagSelection().getIntVectorSorted()[0] == -1)){

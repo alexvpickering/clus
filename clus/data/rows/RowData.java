@@ -702,6 +702,22 @@ public class RowData extends ClusData implements MSortable, Serializable {
 		m_Data = newdata;
 	}
 	
+	// celine added for random forest printing
+	public void add(RowData data1) {
+		int origsize = getNbRows();
+		int size = origsize + data1.getNbRows();
+		setNbRows(size);
+		DataTuple[] newdata;
+		if(m_Data != null)
+			newdata = Arrays.copyOf(m_Data, getNbRows());
+		else
+			newdata = new DataTuple[getNbRows()];
+		for (int i = 0; i < data1.getNbRows(); i++) {
+			newdata[origsize+i] = data1.getTuple(i).cloneTuple();
+		}
+		m_Data = newdata;
+	}
+	
 	public void addAll(RowData data1, RowData data2) {
 		int size = data1.getNbRows() + data2.getNbRows();
 		setNbRows(size);
