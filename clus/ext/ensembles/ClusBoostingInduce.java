@@ -40,6 +40,8 @@ import clus.model.*;
 import clus.statistic.ClusStatistic;
 import clus.util.*;
 
+import java.io.*;
+
 // Method based on:
 // "Improving Regressors using Boosting Techniques" by Harris Drucker
 
@@ -108,11 +110,56 @@ public class ClusBoostingInduce extends ClusInductionAlgorithm {
 				System.out.println("Average loss: "+Lbar+" beta: "+beta);
 			}
 			if (Lbar >= 0.5) break;
+
+      // print boost tree to python script
+      if (cr.getStatManager().getSettings().isOutputPythonModel()) {
+        System.out.println("Creating python script for tree: " + i);
+        printBoostToPythonScript(tree, i, beta, cr.getStatManager());
+      }
+
+
 			updateWeights(trainData, L, beta);
 			result.addModelToForest(tree, beta);
+
+
+
 		}
 		return result;
 	}
+
+
+  public void printBoostToPythonScript(ClusModel model, int i, double beta, ClusStatManager statmgr) {
+    //create a separate .py file
+
+    // get attributes
+    String m_AttributeList = "";
+		ClusAttrType[] cat = ClusSchema.vectorToAttrArray(statmgr.getSchema().collectAttributes(ClusAttrType.ATTR_USE_DESCRIPTIVE, ClusAttrType.THIS_TYPE));
+    for (int ii=0;ii<cat.length-1;ii++) m_AttributeList = m_AttributeList.concat(cat[ii].getName()+", ");
+    m_AttributeList = m_AttributeList.concat(cat[cat.length-1].getName());
+
+		try{
+      if (i == 1) (new File("model")).mkdir();
+			File pyscript = new File("model/"+statmgr.getSettings().getAppName()+"_bag"+i+".py");
+			PrintWriter wrtr = new PrintWriter(new FileOutputStream(pyscript));
+			wrtr.println("# Python code for bag "+i+" in the ensemble");
+			wrtr.println();
+
+      wrtr.println("#Model "+(i+1));
+      wrtr.println("beta = "+beta);
+      wrtr.println("def clus_tree_"+(i+1)+"("+m_AttributeList+"):");
+      model.printModelToPythonScript(wrtr);
+      wrtr.println();
+
+			wrtr.flush();
+			wrtr.close();
+			System.out.println("Model to Python Code written to: "+pyscript.getName());
+		}catch (IOException e) {
+			System.err.println(this.getClass().getName()+".printForestToPython(): Error while writing models to python script");
+			e.printStackTrace();
+		}
+  }
+
+
 
 	public ClusModel induceSingleUnpruned(ClusRun cr) throws ClusException, IOException {
 		return induceSingleUnprunedBoosting(cr);
