@@ -33,6 +33,8 @@ import clus.model.test.*;
 import clus.statistic.*;
 import clus.ext.ensembles.*;
 import clus.heuristic.*;
+import java.lang.reflect.Method;
+import com.rits.cloning.*;
 
 import java.io.*;
 import java.util.*;
@@ -41,6 +43,10 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 
 	protected FindBestTest m_FindBestTest;
 	protected ClusNode m_Root;
+
+  // multi thread
+  int nCores = Runtime.getRuntime().availableProcessors();
+  // int nCores = 1;
 
 	public DepthFirstInduce(ClusSchema schema, Settings sett) throws ClusException, IOException {
 		super(schema, sett);
@@ -178,23 +184,90 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 		}
 		// Find best test
 		
-//		long start_time = System.currentTimeMillis();
+    // descriptive column names
+    ClusAttrType[] attrs = getDescriptiveAttributes();
+		// long start_time = System.currentTimeMillis();
+
+    int maxJ = attrs.length-1;
+    int needCores = Math.min(nCores, attrs.length);
+    int perCore = Math.round(attrs.length/needCores);
+
+
+    // set differently if multithreading
+    CurrentBestTestAndHeuristic best;
+    if (nCores == 1) {
+        // original code for induce
+        for (int i = 0; i < attrs.length; i++) {
+          ClusAttrType at = attrs[i];
+          if (at instanceof NominalAttrType) m_FindBestTest.findNominal((NominalAttrType)at, data);
+          else m_FindBestTest.findNumeric((NumericAttrType)at, data);
+        }
+        best = m_FindBestTest.getBestTest();
+
+    } else {
+        // Parallel induce
+        // System.out.println("Using cores: " + needCores);
+
+        // array to store results from each core
+        Cloner cloner = new Cloner();
+        FindBestTest[] core_FindBestTests = new FindBestTest[needCores];
+        for (int z = 0; z < needCores; z++) {
+            core_FindBestTests[z] = cloner.deepClone(m_FindBestTest);
+        }
+
+        // initialize threads with deep clone of m_FindBestTest
+        Thread[] threads = new Thread[needCores];
+        for (int i = 0; i < needCores; i++) {
+          int jstart = i * perCore;
+          int jstop  = Math.max(jstart + perCore, maxJ);
+          threads[i] = new Thread(new InduceSubset(core_FindBestTests[i], jstart, jstop, attrs, data));
+        }
+
+        // start threads
+        for(int i = 0 ; i < needCores; i++){
+            threads[i].start();
+        }
+
+        // wait for threads to complete
+        for(int i = 0 ; i < needCores; i++){
+          try {
+            threads[i].join();
+          }
+          catch(InterruptedException e) {
+            e.printStackTrace();
+          }
+        }
+
+        // get best from each thread
+        CurrentBestTestAndHeuristic[] bests = new CurrentBestTestAndHeuristic[needCores];
+        // start threads
+        int bestThread = 0;
+        double bestHeur = 0;
+        double curHeur;
+        for(int i = 0 ; i < needCores; i++) {
+            bests[i] = core_FindBestTests[i].getBestTest();
+            if (bests[i].hasBestTest()) {
+                curHeur = bests[i].getHeuristicValue();
+                if (curHeur > bestHeur) {
+                  bestHeur = curHeur;
+                  bestThread = i;
+                  // System.out.println("Current best heuristic from core "+i+": "+bestHeur);
+                }
+            }
+        }
+        best = core_FindBestTests[bestThread].getBestTest();
+    }
 		
-		ClusAttrType[] attrs = getDescriptiveAttributes();
-		for (int i = 0; i < attrs.length; i++) {
-			ClusAttrType at = attrs[i];
-			if (at instanceof NominalAttrType) m_FindBestTest.findNominal((NominalAttrType)at, data);
-			else m_FindBestTest.findNumeric((NumericAttrType)at, data);
-		}
-		
-/*		long stop_time = System.currentTimeMillis();
-		long elapsed = stop_time - start_time;
-		m_Time += elapsed;*/
+
+
+		// long stop_time = System.currentTimeMillis();
+		// long elapsed = stop_time - start_time;
+		// m_Time += elapsed;
 		
 		// Partition data + recursive calls
-		CurrentBestTestAndHeuristic best = m_FindBestTest.getBestTest();
 		if (best.hasBestTest()) {
-//			start_time = System.currentTimeMillis();
+
+			// start_time = System.currentTimeMillis();
 			
 			node.testToNode(best);
 			// Output best test
