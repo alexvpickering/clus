@@ -39,6 +39,7 @@ import com.rits.cloning.*;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.*;
 
 public class DepthFirstInduce extends ClusInductionAlgorithm {
 
@@ -189,10 +190,7 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
     ClusAttrType[] attrs = getDescriptiveAttributes();
 		long start_time = System.currentTimeMillis();
 
-    int maxJ = attrs.length-1;
     int needCores = Math.min(nCores, attrs.length);
-    int perCore = Math.round(attrs.length/needCores);
-
 
     // set differently if multithreading
     CurrentBestTestAndHeuristic best;
@@ -208,54 +206,58 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 
     } else {
         // Parallel induce
-        // array to store results from each core
+        // array to store results, 1 for each core
+        // uses a lot less memory than 1 for each column
         Cloner cloner = new Cloner();
-        FindBestTest[] core_FindBestTests = new FindBestTest[needCores];
-        for (int z = 0; z < needCores; z++) {
-            core_FindBestTests[z] = cloner.deepClone(m_FindBestTest);
-        }
-
-        // initialize threads with deep clone of m_FindBestTest
-        Thread[] threads = new Thread[needCores];
+        FindBestTest[] subtests = new FindBestTest[needCores];
         for (int i = 0; i < needCores; i++) {
-          int jstart = i * perCore;
-          int jstop  = Math.max(jstart + perCore, maxJ);
-          threads[i] = new Thread(new InduceSubset(core_FindBestTests[i], jstart, jstop, attrs, data));
+            subtests[i] = cloner.deepClone(m_FindBestTest);
         }
 
-        // start threads
-        for(int i = 0 ; i < needCores; i++){
-            threads[i].start();
+        ExecutorService executor = Executors.newFixedThreadPool(needCores);
+        CompletableFuture[] futures = new CompletableFuture[needCores];
+
+
+        //  assign new job to run on ith subtest until all columns done
+        // this ensures that whenever a core finishes a column, it get's another (more efficient multithreading)
+        int nextCol = 0;
+        while (nextCol < attrs.length) {
+            // check for completed futures and reassign jobs when complete
+            for (int i = 0; i < needCores; i++) {
+                if (futures[i] == null || futures[i].isDone()) {
+                    // start next column on ith subtest
+                    // since ith future is done, ith subtest is free to use (no race conditions)
+                    futures[i] = CompletableFuture.runAsync(new InduceSubset(subtests[i], nextCol, attrs, data), executor);
+                    nextCol = nextCol + 1;
+                } 
+                if (nextCol == attrs.length) break;
+            }
         }
 
-        // wait for threads to complete
-        for(int i = 0 ; i < needCores; i++){
-          try {
-            threads[i].join();
-          }
-          catch(InterruptedException e) {
-            e.printStackTrace();
-          }
-        }
+        // shutdown executor
+        executor.shutdown();
 
-        // get best from each thread
+        // wait for any remaining jobs to finish
+        try {executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);} catch (Exception e) {}
+
+        // get best from each subtests
         CurrentBestTestAndHeuristic[] bests = new CurrentBestTestAndHeuristic[needCores];
-        // start threads
-        int bestThread = 0;
-        double bestHeur = 0;
+
+        int bestCore = 0;
+        double bestHeur = 0;  
         double curHeur;
         for(int i = 0 ; i < needCores; i++) {
-            bests[i] = core_FindBestTests[i].getBestTest();
+            bests[i] = subtests[i].getBestTest();
             if (bests[i].hasBestTest()) {
                 curHeur = bests[i].getHeuristicValue();
                 if (curHeur > bestHeur) {
                   bestHeur = curHeur;
-                  bestThread = i;
+                  bestCore = i;
                   // System.out.println("Current best heuristic from core "+i+": "+bestHeur);
                 }
             }
         }
-        best = core_FindBestTests[bestThread].getBestTest();
+        best = subtests[bestCore].getBestTest();
     }
 		
 		long stop_time = System.currentTimeMillis();
