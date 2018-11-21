@@ -38,11 +38,15 @@ import clus.model.test.*;
 import clus.error.*;
 import clus.selection.*;
 import clus.statistic.*;
+import com.rits.cloning.*;
 
 /**
  * Multiple rows (tuples) of data.
  * One row (DataTuple) is one instance of the data with target and description attributes.
  */
+
+//  prevents com.rits.cloning.Cloner from making deep copies
+@Immutable
 public class RowData extends ClusData implements MSortable, Serializable {
 
 	public int m_Index;
