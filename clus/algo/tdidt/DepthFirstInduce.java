@@ -34,6 +34,7 @@ import clus.statistic.*;
 import clus.ext.ensembles.*;
 import clus.heuristic.*;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import com.rits.cloning.*;
 
 import java.io.*;
@@ -186,7 +187,7 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 		
     // descriptive column names
     ClusAttrType[] attrs = getDescriptiveAttributes();
-		// long start_time = System.currentTimeMillis();
+		long start_time = System.currentTimeMillis();
 
     int maxJ = attrs.length-1;
     int needCores = Math.min(nCores, attrs.length);
@@ -196,6 +197,7 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
     // set differently if multithreading
     CurrentBestTestAndHeuristic best;
     if (nCores == 1) {
+      
         // original code for induce
         for (int i = 0; i < attrs.length; i++) {
           ClusAttrType at = attrs[i];
@@ -206,8 +208,6 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 
     } else {
         // Parallel induce
-        // System.out.println("Using cores: " + needCores);
-
         // array to store results from each core
         Cloner cloner = new Cloner();
         FindBestTest[] core_FindBestTests = new FindBestTest[needCores];
@@ -258,10 +258,16 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
         best = core_FindBestTests[bestThread].getBestTest();
     }
 		
-
-
-		// long stop_time = System.currentTimeMillis();
-		// long elapsed = stop_time - start_time;
+		long stop_time = System.currentTimeMillis();
+		long elapsed = stop_time - start_time;
+    String unit = "ms";
+    if (elapsed > 60000) {
+      elapsed = elapsed/60000;
+      unit = "min";
+    } else if (elapsed > 1000) {
+      elapsed = elapsed/1000;
+      unit = "s";
+    }
 		// m_Time += elapsed;
 		
 		// Partition data + recursive calls
@@ -271,7 +277,7 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 			
 			node.testToNode(best);
 			// Output best test
-			if (Settings.VERBOSE > 0) System.out.println("Test: "+node.getTestString()+" -> "+best.getHeuristicValue());
+			if (Settings.VERBOSE > 0) System.out.println("Test: "+node.getTestString()+" -> "+best.getHeuristicValue()+" ("+elapsed+unit+")");
 			// Create children
 			int arity = node.updateArity();
 			NodeTest test = node.getTest();
