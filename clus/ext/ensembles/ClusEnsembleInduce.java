@@ -376,7 +376,7 @@ public class ClusEnsembleInduce extends ClusInductionAlgorithm {
     m_AttributeList = m_AttributeList.concat(cat[cat.length-1].getName());
 
 		try{
-      if (i == 1) (new File("model")).mkdir();
+      if (i == 0) (new File("model")).mkdir();
 			File pyscript = new File("model/"+statmgr.getSettings().getAppName()+"_bag"+i+".py");
 			PrintWriter wrtr = new PrintWriter(new FileOutputStream(pyscript));
 			wrtr.println("# Python code for bag "+i+" in the ensemble");
