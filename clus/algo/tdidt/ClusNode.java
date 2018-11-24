@@ -1254,7 +1254,6 @@ public class ClusNode extends MyNode implements ClusModel {
 		} else {
 			if (m_TargetStat != null) {
 				writer.println(prefix+"return "+m_TargetStat.getArrayOfStatistic());
-				System.out.println(m_TargetStat.getClass());
 			}
 		}
 	}
