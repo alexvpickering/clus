@@ -55,10 +55,15 @@ public class ClusBoostingInduce extends ClusInductionAlgorithm {
 
 	public double[] computeNormalizedLoss(RowData trainData, ClusNode tree) {
 		ClusAttributeWeights weights = getStatManager().getClusteringWeights();
+
 		double[] L = new double[trainData.getNbRows()];
 		for (int i = 0; i < trainData.getNbRows(); i++) {
+      // all values for row
 			DataTuple tuple = trainData.getTuple(i);
+
+      // the prediction (not totally clear to me how generated)
 			ClusStatistic prediction = tree.predictWeighted(tuple);
+
 			L[i] = prediction.getSquaredDistance(tuple, weights);
 		}
 		double D = MDoubleArray.max(L);
@@ -96,6 +101,12 @@ public class ClusBoostingInduce extends ClusInductionAlgorithm {
 		int[] outputEnsembleAt = getSettings().getNbBaggingSets().getIntVectorSorted();
 		int nbTrees = outputEnsembleAt[outputEnsembleAt.length-1];
 		int verbose = Settings.VERBOSE;
+
+    // directory for python models
+    if (cr.getStatManager().getSettings().isOutputPythonModel()) {
+      (new File("model")).mkdir();
+    }
+
 		for (int i = 0; i < nbTrees; i++) {
 			if (verbose != 0) {
 				System.out.println();
@@ -103,6 +114,8 @@ public class ClusBoostingInduce extends ClusInductionAlgorithm {
 			}
 			RowData train = trainData.sampleWeighted(m_Random);
 			ClusNode tree = tdidt.induceSingleUnpruned(train);
+      
+      // loss for each row
 			double[] L = computeNormalizedLoss(trainData, tree);
 			double Lbar = computeAverageLoss(trainData, L);
 			double beta = Lbar / (1-Lbar);
@@ -137,14 +150,14 @@ public class ClusBoostingInduce extends ClusInductionAlgorithm {
     for (int ii=0;ii<cat.length-1;ii++) m_AttributeList = m_AttributeList.concat(cat[ii].getName()+", ");
     m_AttributeList = m_AttributeList.concat(cat[cat.length-1].getName());
 
-		try{
-      if (i == 0) (new File("model")).mkdir();
+		try {
 			File pyscript = new File("model/"+statmgr.getSettings().getAppName()+"_bag"+i+".py");
 			PrintWriter wrtr = new PrintWriter(new FileOutputStream(pyscript));
 			wrtr.println("# Python code for bag "+i+" in the ensemble");
 			wrtr.println();
 
       wrtr.println("#Model "+(i+1));
+      wrtr.println("#weight of tree = log(1/beta)");
       wrtr.println("beta = "+beta);
       wrtr.println("def clus_tree_"+(i+1)+"("+m_AttributeList+"):");
       model.printModelToPythonScript(wrtr);

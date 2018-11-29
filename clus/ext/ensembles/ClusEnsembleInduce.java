@@ -58,6 +58,11 @@ public class ClusEnsembleInduce extends ClusInductionAlgorithm {
 	static boolean m_OptMode;
 	ClusEnsembleInduceOptimization m_Optimization;
 
+  // multi thread
+  int nCores = Runtime.getRuntime().availableProcessors() - 1;
+  //volatile transient boolean helpRequested = false;
+  volatile transient boolean[] helpRequested =new boolean[nCores];
+  boolean OOBinline = true;
 	
 	//Output ensemble at different values
 	int[] m_OutEnsembleAt;//sorted values (ascending)!
@@ -325,8 +330,22 @@ public class ClusEnsembleInduce extends ClusInductionAlgorithm {
 		}
 		BaggingSelection msel = null;
 		int[] bagSelections = getSettings().getBagSelection().getIntVectorSorted();
+
+
+    // directory for python scripts
+    if (cr.getStatManager().getSettings().isOutputPythonModel()) {
+      (new File("model")).mkdir();
+    }
+
+
+    // only parallel tree growth for RForest (others check for splits over columns in parallel)
+    // may make sense for other methods if few columns
+     if (getSettings().getEnsembleMethod() != Settings.ENSEMBLE_RFOREST) {
+      nCores = 1;
+    }
+
 		// bagSelections is either -1, 0, a value in [1,Iterations], or 2 values in [1,Iterations]
-		if (bagSelections[0] == -1) {
+		if (bagSelections[0] == -1 && nCores == 1) {
         // normal bagging procedure
         for (int i = 1; i <= m_NbMaxBags; i++) {
             msel = new BaggingSelection(nbrows, getSettings().getEnsembleBagSize());
@@ -338,6 +357,77 @@ public class ClusEnsembleInduce extends ClusInductionAlgorithm {
           }
           induceOneBag(cr, i, origMaxDepth, oob_sel, oob_total, train_iterator, test_iterator, msel);
         }
+    } else if (bagSelections[0] == -1 && nCores > 1) {
+      
+      final ClusRun cr1 = cr;
+      final int origMaxDepth2 = origMaxDepth;
+      final TupleIterator train_iterator2 = cr.getTrainIter();
+      test_iterator = null;
+      if (m_BagClus.hasTestSet()){
+				  test_iterator = cr.getTestSet().getIterator();
+      }
+      final TupleIterator test_iterator2 = test_iterator;
+      System.out.println("Detected cores: " + nCores);
+      for (int z = 0; z < nCores; z++) {
+          helpRequested[z] = false;
+      }
+      for (int i = 1; i <= m_NbMaxBags; i += nCores) {
+          for (int j = 0; j < nCores; j++) {
+              final int n = i + j;
+              if (n > m_NbMaxBags) {                       
+                  break;
+              }        
+              msel= new BaggingSelection(nbrows, getSettings().getEnsembleBagSize());
+              if (Settings.shouldEstimateOOB()) {		//OOB estimate is on
+                  oob_sel = new OOBSelection(msel);
+                  if (i == 1 && j == 0) { //initialization
+                      oob_total = new OOBSelection(msel);                                
+                  } else {
+                      oob_total.addToThis(oob_sel);
+                  }
+              }
+              final BaggingSelection msel3 = msel;
+              final OOBSelection oob_sel3 = oob_sel;
+              final OOBSelection oob_total2 = oob_total;
+                    
+              if (j == nCores - 1) {
+            
+                  induceOneBag(cr1, n, origMaxDepth2, oob_sel3, oob_total2, train_iterator2, test_iterator2, msel3);                          
+                  for (int z = 0; z < nCores; z++) {
+                    //  if (helpRequested[z])
+                          //System.out.println("Waiting for " + z + " to finish");
+                      while (helpRequested[z]) {
+                      } // if we are on final
+                  }
+              } else {
+                  final int threadnr = j;
+                  // if (helpRequested[j])
+                      //System.out.println("Waiting for " + j + " to finish");
+                  while (helpRequested[j]) {
+                  }
+                  helpRequested[threadnr] = true;
+                  new Thread() {
+                      public void run() {
+                          try {
+                              // System.out.println("Created thread for Bag: " + n + " threadnr: " + threadnr);
+                              induceOneBag(cr1, n, origMaxDepth2, oob_sel3, oob_total2, train_iterator2, test_iterator2, msel3);
+                              helpRequested[threadnr] = false;
+                          } catch (Exception e) {
+                                helpRequested[threadnr] = false;
+                              e.printStackTrace();
+                          }
+                      }
+                  }.start();
+              }
+          }
+      }
+      //  System.out.println("Waiting for the final run");
+      for (int z = 0; z < nCores; z++) {
+          while (helpRequested[z]) {
+          } // if we are on final
+      }
+  
+      if (!OOBinline) makeForestFromBags(cr, train_iterator, test_iterator);
     }
 		else if (bagSelections[0] == 0) {
 			// we assume that files _bagI.model exist, for I=1..m_NbMaxBags and build the forest from them
@@ -376,7 +466,6 @@ public class ClusEnsembleInduce extends ClusInductionAlgorithm {
     m_AttributeList = m_AttributeList.concat(cat[cat.length-1].getName());
 
 		try{
-      if (i == 0) (new File("model")).mkdir();
 			File pyscript = new File("model/"+statmgr.getSettings().getAppName()+"_bag"+i+".py");
 			PrintWriter wrtr = new PrintWriter(new FileOutputStream(pyscript));
 			wrtr.println("# Python code for bag "+i+" in the ensemble");
@@ -448,15 +537,13 @@ public class ClusEnsembleInduce extends ClusInductionAlgorithm {
 			}
 		}
 
+    // create a python script for each bag
+    if (cr.getStatManager().getSettings().isOutputPythonModel()) {
+      System.out.println("Creating python script for bag: " + i);
+      printBagToPythonScript(model, i, cr.getStatManager());
+    }
+
 		if (m_OptMode){
-
-        // create a python script for each bag
-        if (cr.getStatManager().getSettings().isOutputPythonModel()) {
-          System.out.println("Creating python script for bag: " + i);
-          printBagToPythonScript(model, i, cr.getStatManager());
-        }
-
-
 			if (i == 1) m_Optimization.initModelPredictionForTuples(model, train_iterator, test_iterator);
 			else m_Optimization.addModelPredictionForTuples(model, train_iterator, test_iterator, i);
 		}

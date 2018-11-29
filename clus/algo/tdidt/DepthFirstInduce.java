@@ -47,7 +47,7 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 	protected ClusNode m_Root;
 
   // multi thread
-  int nCores = Runtime.getRuntime().availableProcessors();
+  int nCores = Runtime.getRuntime().availableProcessors() - 1;
   // int nCores = 1;
 
 	public DepthFirstInduce(ClusSchema schema, Settings sett) throws ClusException, IOException {
@@ -98,13 +98,17 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 				ClusAttrType[] attrsAll = schema.getDescriptiveAttributes();
 				ClusEnsembleInduce.setRandomSubspaces(attrsAll, schema.getSettings().getNbRandomAttrSelected());
 				return ClusEnsembleInduce.getRandomSubspaces();
+      case Settings.ENSEMBLE_BOOSTING:
+        ClusAttrType[] attrsAll1 = schema.getDescriptiveAttributes();
+				ClusEnsembleInduce.setRandomSubspaces(attrsAll1, schema.getSettings().getNbRandomAttrSelected());
+				return ClusEnsembleInduce.getRandomSubspaces();
 			case Settings.ENSEMBLE_RSUBSPACES:
 				return ClusEnsembleInduce.getRandomSubspaces();
 			case Settings.ENSEMBLE_BAGSUBSPACES:
 				return ClusEnsembleInduce.getRandomSubspaces();
 			case Settings.ENSEMBLE_NOBAGRFOREST:
-				ClusAttrType[] attrsAll1 = schema.getDescriptiveAttributes();
-				ClusEnsembleInduce.setRandomSubspaces(attrsAll1, schema.getSettings().getNbRandomAttrSelected());
+				ClusAttrType[] attrsAll2 = schema.getDescriptiveAttributes();
+				ClusEnsembleInduce.setRandomSubspaces(attrsAll2, schema.getSettings().getNbRandomAttrSelected());
 				return ClusEnsembleInduce.getRandomSubspaces();
 			default:
 				return schema.getDescriptiveAttributes();
@@ -192,9 +196,15 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 
     int needCores = Math.min(nCores, attrs.length);
 
+    // RForest parallel trees makes more sense (often few attributes)
+    // too few attributes parallel doesn't make sense (not sure of good cutoff)
+    if (getSettings().getEnsembleMethod() == Settings.ENSEMBLE_RFOREST || attrs.length < 50) {
+      needCores = 1;
+    }
+
     // set differently if multithreading
     CurrentBestTestAndHeuristic best;
-    if (nCores == 1) {
+    if (needCores == 1) {
       
         // original code for induce
         for (int i = 0; i < attrs.length; i++) {
