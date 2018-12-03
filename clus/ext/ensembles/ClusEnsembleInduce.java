@@ -508,7 +508,15 @@ public class ClusEnsembleInduce extends ClusInductionAlgorithm {
 		}
 		ind.initialize();
 		crSingle.getStatManager().initClusteringWeights();
-		ClusModel model = ind.induceSingleUnpruned(crSingle);
+
+    ClusModel model;
+    if (getSettings().isOutputPythonModel() && getSettings().hasTreeOptimize(Settings.TREE_OPTIMIZE_NO_INODE_STATS)) {
+		  model = ind.induceSingleUnpruned(crSingle, i);
+
+    } else {
+		  model = ind.induceSingleUnpruned(crSingle);
+
+    }
 		m_SummTime += ResourceInfo.getTime() - one_bag_time;
 
 //		OOB estimate for the parallel implementation is done in makeForestFromBags method
@@ -538,12 +546,14 @@ public class ClusEnsembleInduce extends ClusInductionAlgorithm {
 		}
 
     // create a python script for each bag
-    if (cr.getStatManager().getSettings().isOutputPythonModel()) {
+    if (getSettings().isOutputPythonModel() && !getSettings().hasTreeOptimize(Settings.TREE_OPTIMIZE_NO_INODE_STATS)) {
       System.out.println("Creating python script for bag: " + i);
       printBagToPythonScript(model, i, cr.getStatManager());
     }
 
-		if (m_OptMode){
+    // model not being stored with tree optimization
+		if (m_OptMode && !getSettings().hasTreeOptimize(Settings.TREE_OPTIMIZE_NO_INODE_STATS)){
+      System.out.println("here");
 			if (i == 1) m_Optimization.initModelPredictionForTuples(model, train_iterator, test_iterator);
 			else m_Optimization.addModelPredictionForTuples(model, train_iterator, test_iterator, i);
 		}

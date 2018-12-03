@@ -306,7 +306,7 @@ public class ClusOutput {
 					
 				}
 				m_Writer.println();
-				if (getSettings().isOutputPythonModel()) {
+				if (getSettings().isOutputPythonModel() && !getSettings().hasTreeOptimize(Settings.TREE_OPTIMIZE_NO_CLUSTERING_STATS)) {
 					if (getSettings().isEnsembleMode() && (i == ClusModel.ORIGINAL)){
 						root.printModelToPythonScript(m_Writer);//root is a forest
 					} else {

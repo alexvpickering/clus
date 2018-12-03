@@ -45,10 +45,10 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 
 	protected FindBestTest m_FindBestTest;
 	protected ClusNode m_Root;
+  protected PrintWriter m_Writer;
 
   // multi thread
   int nCores = Runtime.getRuntime().availableProcessors() - 1;
-  // int nCores = 1;
 
 	public DepthFirstInduce(ClusSchema schema, Settings sett) throws ClusException, IOException {
 		super(schema, sett);
@@ -177,11 +177,12 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 	public void makeLeaf(ClusNode node) {
 		node.makeLeaf();
 		if (getSettings().hasTreeOptimize(Settings.TREE_OPTIMIZE_NO_CLUSTERING_STATS)) {
-			node.setClusteringStat(null);
+				node.setClusteringStat(null);
 		}
 	}
 	
-	public void induce(ClusNode node, RowData data) {
+  // for python printing when tree is optimized
+	public void induce(ClusNode node, RowData data, String prefix) {
 		//System.out.println("nonsparse induce");
 		// Initialize selector and perform various stopping criteria
 		if (initSelectorAndStopCrit(node, data)) {
@@ -194,13 +195,160 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
     ClusAttrType[] attrs = getDescriptiveAttributes();
 		long start_time = System.currentTimeMillis();
 
-    int needCores = Math.min(nCores, attrs.length);
-
-    // RForest parallel trees makes more sense (often few attributes)
-    // too few attributes parallel doesn't make sense (not sure of good cutoff)
-    if (getSettings().getEnsembleMethod() == Settings.ENSEMBLE_RFOREST || attrs.length < 50) {
+    int needCores;
+    if (getSettings().getEnsembleMethod() == Settings.ENSEMBLE_RFOREST) {
+      // RForest faster if parallel trees
       needCores = 1;
+    } else {
+      // from empirical speed tests of 1 vs 1+ cores
+      int ndata = data.getNbRows() * attrs.length;
+      needCores = ndata >= 480 ? Math.min(nCores, 3) : 1;
     }
+
+    // set differently if multithreading
+    CurrentBestTestAndHeuristic best;
+    if (needCores == 1) {
+      
+        // original code for induce
+        for (int i = 0; i < attrs.length; i++) {
+          ClusAttrType at = attrs[i];
+          if (at instanceof NominalAttrType) m_FindBestTest.findNominal((NominalAttrType)at, data);
+          else m_FindBestTest.findNumeric((NumericAttrType)at, data);
+        }
+        best = m_FindBestTest.getBestTest();
+
+    } else {
+        // Parallel induce
+        // array to store results, 1 for each core
+        // uses a lot less memory than 1 for each column
+        Cloner cloner = new Cloner();
+        FindBestTest[] subtests = new FindBestTest[needCores];
+        for (int i = 0; i < needCores; i++) {
+            subtests[i] = cloner.deepClone(m_FindBestTest);
+        }
+
+        ExecutorService executor = Executors.newFixedThreadPool(needCores);
+        CompletableFuture[] futures = new CompletableFuture[needCores];
+
+
+        //  assign new job to run on ith subtest until all columns done
+        // this ensures that whenever a core finishes a column, it get's another (more efficient multithreading)
+        int nextCol = 0;
+        while (nextCol < attrs.length) {
+            // check for completed futures and reassign jobs when complete
+            for (int i = 0; i < needCores; i++) {
+                if (futures[i] == null || futures[i].isDone()) {
+                    // start next column on ith subtest
+                    // since ith future is done, ith subtest is free to use (no race conditions)
+                    futures[i] = CompletableFuture.runAsync(new InduceSubset(subtests[i], nextCol, attrs, data), executor);
+                    nextCol = nextCol + 1;
+                } 
+                if (nextCol == attrs.length) break;
+            }
+        }
+
+        // shutdown executor
+        executor.shutdown();
+
+        // wait for any remaining jobs to finish
+        try {executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);} catch (Exception e) {}
+
+        // get best from each subtests
+        CurrentBestTestAndHeuristic[] bests = new CurrentBestTestAndHeuristic[needCores];
+
+        int bestCore = 0;
+        double bestHeur = 0;  
+        double curHeur;
+        for(int i = 0 ; i < needCores; i++) {
+            bests[i] = subtests[i].getBestTest();
+            if (bests[i].hasBestTest()) {
+                curHeur = bests[i].getHeuristicValue();
+                if (curHeur > bestHeur) {
+                  bestHeur = curHeur;
+                  bestCore = i;
+                  // System.out.println("Current best heuristic from core "+i+": "+bestHeur);
+                }
+            }
+        }
+        best = subtests[bestCore].getBestTest();
+    }
+		
+		long stop_time = System.currentTimeMillis();
+		double elapsed = stop_time - start_time;
+    String unit = "ms";
+    if (elapsed > 60000) {
+      elapsed = elapsed/60000;
+      unit = "min";
+    } else if (elapsed > 1000) {
+      elapsed = elapsed/1000;
+      unit = "s";
+    }
+		// m_Time += elapsed;
+		
+		// Partition data + recursive calls
+		if (best.hasBestTest()) {
+
+			// start_time = System.currentTimeMillis();
+			
+			node.testToNode(best);
+			// Output best test
+			if (Settings.VERBOSE > 0) System.out.println("Test: "+node.getTestString()+" -> "+best.getHeuristicValue()+" ("+elapsed+unit+")");
+			// Create children
+			int arity = node.updateArity();
+			NodeTest test = node.getTest();
+			RowData[] subsets = new RowData[arity];
+			for (int j = 0; j < arity; j++) {
+				subsets[j] = data.applyWeighted(test, j);
+			}
+			if (getSettings().showAlternativeSplits()) {
+				filterAlternativeSplits(node, data, subsets);
+			}
+
+      // print to file
+      m_Writer.println(prefix+"if " +node.getTestString()+":");
+
+      // Don't remove statistics of root node; code below depends on them
+      node.setClusteringStat(null);
+      node.setTargetStat(null);
+      node.setTest(null);
+
+			for (int j = 0; j < arity; j++) {
+				ClusNode child = new ClusNode();
+				node.setChild(child, j);
+				child.initClusteringStat(m_StatManager, m_Root.getClusteringStat(), subsets[j]);
+				child.initTargetStat(m_StatManager, m_Root.getTargetStat(), subsets[j]);
+        if (j == 1) m_Writer.println(prefix+"else: ");
+				induce(child, subsets[j], prefix+"    ");
+			}
+
+    m_Writer.flush();
+		} else {
+			makeLeaf(node);
+      node.postProc(null);
+      m_Writer.println(prefix+"return "+node.getTargetStat().getArrayOfStatistic());
+      m_Writer.flush();
+
+      node.setTargetStat(null);
+      node.setTest(null);
+
+		}
+	}
+
+  public void induce(ClusNode node, RowData data) {
+		//System.out.println("nonsparse induce");
+		// Initialize selector and perform various stopping criteria
+		if (initSelectorAndStopCrit(node, data)) {
+			makeLeaf(node);
+			return;
+		}
+		// Find best test
+		
+    // descriptive column names
+    ClusAttrType[] attrs = getDescriptiveAttributes();
+		long start_time = System.currentTimeMillis();
+
+    int ndata = data.getNbRows() * attrs.length;
+    int needCores = ndata >= 480 ? Math.min(nCores, 3) : 1;
 
     // set differently if multithreading
     CurrentBestTestAndHeuristic best;
@@ -300,6 +448,7 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 			if (getSettings().showAlternativeSplits()) {
 				filterAlternativeSplits(node, data, subsets);
 			}
+
 			if (node != m_Root && getSettings().hasTreeOptimize(Settings.TREE_OPTIMIZE_NO_INODE_STATS)) {
 				// Don't remove statistics of root node; code below depends on them
 				node.setClusteringStat(null);
@@ -351,8 +500,9 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 	}
 
 	public ClusNode induceSingleUnpruned(RowData data) throws ClusException, IOException {
-		m_Root = null;
+
 		// Begin of induction process
+		m_Root = null;
 		int nbr = 0;
 		while (true) {
 			nbr++;
@@ -375,7 +525,54 @@ public class DepthFirstInduce extends ClusInductionAlgorithm {
 		return m_Root;
 	}
 
+  // for python printing when tree is optimized
+  public ClusNode induceSingleUnpruned(RowData data, int i) throws ClusException, IOException {
+
+    // init python model
+    File pyscript = new File("model/"+m_StatManager.getSettings().getAppName()+"_bag"+i+".py");
+    m_Writer = new PrintWriter(new FileOutputStream(pyscript));
+     
+    m_Writer.println("# Python code for bag "+i+" in the ensemble");
+    m_Writer.println();
+
+    m_Writer.println("#Model "+(i+1));
+    m_Writer.println("def clus_tree_"+(i+1)+"():");
+
+
+		// Begin of induction process
+		m_Root = null;
+		int nbr = 0;
+		while (true) {
+			nbr++;
+			// Init root node
+			m_Root = new ClusNode();
+			m_Root.initClusteringStat(m_StatManager, data);
+			m_Root.initTargetStat(m_StatManager, data);
+			m_Root.getClusteringStat().showRootInfo();
+			initSelectorAndSplit(m_Root.getClusteringStat());
+			setInitialData(m_Root.getClusteringStat(),data);
+			// Induce the tree
+			induce(m_Root, data, "    ");
+			// rankFeatures(m_Root, data);
+			// Refinement finished
+			if (Settings.EXACT_TIME == false) break;
+		}
+
+    // finish python model
+    m_Writer.flush();
+    m_Writer.close();
+    System.out.println("Model to Python Code written to: "+pyscript.getName());
+
+		cleanSplit();
+		return m_Root;
+	}
+
 	public ClusModel induceSingleUnpruned(ClusRun cr) throws ClusException, IOException {
 		return induceSingleUnpruned((RowData)cr.getTrainingSet());
+	}
+
+  // for python printing when tree is optimized
+  public ClusModel induceSingleUnpruned(ClusRun cr, int i) throws ClusException, IOException {
+		return induceSingleUnpruned((RowData)cr.getTrainingSet(), i);
 	}
 }
